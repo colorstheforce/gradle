@@ -38,7 +38,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.StandardOpenOption;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -73,10 +75,17 @@ class InstrumentingClasspathFileTransformer implements ClasspathFileTransformer 
             if (INSTRUMENTING.contains(transformed)) {
                 throw new GradleException(format("Instrumented classpath file '{}' is not ready.", destFileName));
             }
+            try (FileChannel c = FileChannel.open(transformed.toPath(), StandardOpenOption.READ)) {
+                c.lock(0, Long.MAX_VALUE, true).release();
+            } catch (IOException e) {
+                throw new GradleException(format("Instrumented classpath file '{}' is being written by another process.", destFileName), e);
+            }
             return transformed;
         }
 
-        INSTRUMENTING.add(transformed);
+        if (!INSTRUMENTING.add(transformed)) {
+            throw new GradleException(format("Instrumented classpath file '{}' was taken over by another writer.", destFileName));
+        }
         try {
             transform(source, transformed);
         } catch (GradleException e) {
